@@ -2,6 +2,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from typing import Any
 
 import cv2
 import mediapipe as mp
@@ -18,13 +19,11 @@ from spotipy import SpotifyOAuth
 load_dotenv()
 
 
-def handle_closed():
-    print('Closed')
-
+def get_spotify() -> spotipy.Spotify:
     client_id = os.environ['CLIENT_ID']
     client_secret = os.environ['CLIENT_SECRET']
 
-    spotify = spotipy.Spotify(
+    return spotipy.Spotify(
         auth_manager=SpotifyOAuth(
             client_id=client_id,
             client_secret=client_secret,
@@ -33,20 +32,67 @@ def handle_closed():
         )
     )
 
-    device_id: str
+
+def get_devices(spotify: spotipy.Spotify) -> list[Any]:
+    devices = spotify.devices()['devices']
+    if len(devices) == 0:
+        raise Exception('No devices found')
+    return devices
+
+
+def get_first_device(spotify: spotipy.Spotify) -> Any:
+    return get_devices(spotify)[0]
+
+
+def get_active_device_id(spotify: spotipy.Spotify) -> str | None:
     playback = spotify.current_playback()
     if playback is None:
-        devices = spotify.devices()['devices']
-        if len(devices) == 0:
-            raise Exception('No devices found')
-        device_id = devices[0]['id']
-    else:
-        device_id = playback['device']['id']
+        return None
+    return playback['device']['id']
 
+
+def get_active_or_first_device_id(spotify: spotipy.Spotify) -> str:
+    active = get_active_device_id(spotify)
+    if active is None:
+        return get_first_device(spotify)['id']
+    return active
+
+
+def get_next_device_id(spotify: spotipy.Spotify) -> str:
+    active = get_active_device_id(spotify)
+    if active is None:
+        return get_first_device(spotify)['id']
+
+    devices = get_devices(spotify)
+    try:
+        current_index = [device['id'] for device in devices].index(active)
+        next_index = (current_index + 1) % len(devices)
+        return devices[next_index]['id']
+    except ValueError:
+        return get_first_device(spotify)['id']
+
+
+def handle_closed():
+    print('Pause/Resume')
+
+    spotify = get_spotify()
+
+    device_id = get_active_or_first_device_id(spotify)
     if spotify.currently_playing() is not None and spotify.currently_playing()['is_playing']:
         spotify.pause_playback()
     else:
         spotify.start_playback(device_id)
+
+    cam_state.close()
+
+
+def handle_pointing_up():
+    print('Next device')
+
+    spotify = get_spotify()
+
+    device_id = get_next_device_id(spotify)
+    spotify.transfer_playback(device_id)
 
     cam_state.close()
 
@@ -94,8 +140,11 @@ def listen(result: GestureRecognizerResult):
         cam_state.open()
         return
 
-    if category.category_name == 'Closed_Fist' and cam_state.ready():
-        handle_closed()
+    if cam_state.ready():
+        if category.category_name == 'Closed_Fist':
+            handle_closed()
+        elif category.category_name == 'Pointing_Up':
+            handle_pointing_up()
 
 
 def handle_image(result: GestureRecognizerResult, image: mp.Image, cap: cv2.VideoCapture):
