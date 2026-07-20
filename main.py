@@ -1,29 +1,51 @@
 import cv2
 import mediapipe as mp
-from mediapipe import ImageFormat
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
+from mediapipe.tasks.python.vision import drawing_utils
+from mediapipe.tasks.python.vision.core.vision_task_running_mode import VisionTaskRunningMode
+from mediapipe.tasks.python.vision.hand_landmarker import HandLandmarker, HandLandmarkerOptions, HandLandmarkerResult, \
+    HandLandmarksConnections
 
-import lmonimage
+cap: cv2.VideoCapture = cv2.VideoCapture(0)
 
-base_options: python.BaseOptions = python.BaseOptions(model_asset_path='hand_landmarker.task')
-options: vision.HandLandmarkerOptions = vision.HandLandmarkerOptions(base_options=base_options, num_hands=2)
+def handle_image(result: HandLandmarkerResult, image: mp.Image, _):
+    bgr_image = cv2.cvtColor(image.numpy_view(), cv2.COLOR_RGB2BGR)
+    for hand in result.hand_landmarks:
+        drawing_utils.draw_landmarks(bgr_image, hand, [
+            HandLandmarksConnections.Connection(4, 8),
+            HandLandmarksConnections.Connection(8, 12),
+            HandLandmarksConnections.Connection(12, 16),
+            HandLandmarksConnections.Connection(16, 20)
+        ])
 
-detector: vision.HandLandmarker = vision.HandLandmarker.create_from_options(options)
-capture: cv2.VideoCapture = cv2.VideoCapture(0)
-
-while capture.isOpened():
-    frame: cv2.Mat
-    success, frame = capture.read()
-    if not success:
-        print("Ignoring empty camera frame.")
-        continue
-    frame = cv2.flip(frame, 1)
-    image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    media_image = mp.Image(ImageFormat.SRGB, image)
-    detected_image = lmonimage.draw_landmarks_on_image(image, detector.detect(media_image))
-    image = cv2.cvtColor(detected_image, cv2.COLOR_RGB2BGR)
-    cv2.imshow('image', image)
+    rgb_image = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB)
+    cv2.imshow('Result', rgb_image)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+        cap.release()
+        cv2.destroyAllWindows()
+
+
+def main():
+    lm_options = HandLandmarkerOptions(
+        base_options=mp.tasks.BaseOptions(model_asset_path='hand_landmarker.task'),
+        num_hands=1,
+        running_mode=VisionTaskRunningMode.LIVE_STREAM,
+        result_callback=handle_image)
+    lm = HandLandmarker.create_from_options(lm_options)
+
+    while cap.isOpened():
+        frame: cv2.Mat
+        isSuccess, frame = cap.read()
+        if not isSuccess:
+            print('Ignoring empty camera frame.')
+            continue
+
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
+        try:
+            lm.detect_async(image=mp_image, timestamp_ms=int(cap.get(cv2.CAP_PROP_POS_MSEC)))
+        except ValueError as e:
+            if 'timestamp_ms' in str(e):
+                pass
+
+if __name__ == '__main__':
+    main()
