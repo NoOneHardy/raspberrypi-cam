@@ -37,7 +37,8 @@ class PlaybackManager:
         return playback['item'] if playback else None, playback
 
     def is_playing(self) -> bool:
-        return self.get_playback_state()['is_playing'] if self.get_playback_state() is not None else False
+        playback = self.get_playback_state()
+        return playback['is_playing'] if playback is not None else False
 
     def toggle_playback_state(self):
         playback = self.get_playback_state()
