@@ -2,7 +2,6 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
 
 import cv2
 import mediapipe as mp
@@ -15,6 +14,8 @@ from mediapipe.tasks.python.vision.gesture_recognizer import GestureRecognizerOp
 from mediapipe.tasks.python.vision.gesture_recognizer_result import GestureRecognizerResult
 from mediapipe.tasks.python.vision.hand_landmarker import HandLandmarksConnections
 from spotipy import SpotifyOAuth
+
+from playback_manager import PlaybackManager
 
 load_dotenv()
 
@@ -33,66 +34,31 @@ def get_spotify() -> spotipy.Spotify:
     )
 
 
-def get_devices(spotify: spotipy.Spotify) -> list[Any]:
-    devices = spotify.devices()['devices']
-    if len(devices) == 0:
-        raise Exception('No devices found')
-    return devices
-
-
-def get_first_device(spotify: spotipy.Spotify) -> Any:
-    return get_devices(spotify)[0]
-
-
-def get_active_device_id(spotify: spotipy.Spotify) -> str | None:
-    playback = spotify.current_playback()
-    if playback is None:
-        return None
-    return playback['device']['id']
-
-
-def get_active_or_first_device_id(spotify: spotipy.Spotify) -> str:
-    active = get_active_device_id(spotify)
-    if active is None:
-        return get_first_device(spotify)['id']
-    return active
-
-
-def get_next_device_id(spotify: spotipy.Spotify) -> str:
-    active = get_active_device_id(spotify)
-    if active is None:
-        return get_first_device(spotify)['id']
-
-    devices = get_devices(spotify)
-    try:
-        current_index = [device['id'] for device in devices].index(active)
-        next_index = (current_index + 1) % len(devices)
-        return devices[next_index]['id']
-    except ValueError:
-        return get_first_device(spotify)['id']
-
-
-def handle_closed():
-    print('Pause/Resume')
+def handle_closed_fist():
+    print('Gesture detected: CLOSED_FIST')
 
     spotify = get_spotify()
-
-    device_id = get_active_or_first_device_id(spotify)
-    if spotify.currently_playing() is not None and spotify.currently_playing()['is_playing']:
-        spotify.pause_playback()
-    else:
-        spotify.start_playback(device_id)
-
+    pm: PlaybackManager = PlaybackManager(spotify)
+    pm.toggle_playback_state()
     cam_state.close()
 
 
 def handle_pointing_up():
-    print('Next device')
+    print('Gesture detected: POINTING_UP')
 
     spotify = get_spotify()
+    pm: PlaybackManager = PlaybackManager(spotify)
+    pm.skip_track()
 
-    device_id = get_next_device_id(spotify)
-    spotify.transfer_playback(device_id)
+    cam_state.close()
+
+
+def handle_thumb_up():
+    print('Gesture detected: THUMB_UP')
+
+    spotify = get_spotify()
+    pm: PlaybackManager = PlaybackManager(spotify)
+    pm.replay()
 
     cam_state.close()
 
@@ -142,9 +108,11 @@ def listen(result: GestureRecognizerResult):
 
     if cam_state.ready():
         if category.category_name == 'Closed_Fist':
-            handle_closed()
+            handle_closed_fist()
         elif category.category_name == 'Pointing_Up':
             handle_pointing_up()
+        elif category.category_name == 'Thumb_Up':
+            handle_thumb_up()
 
 
 def handle_image(result: GestureRecognizerResult, image: mp.Image, cap: cv2.VideoCapture):
@@ -209,7 +177,7 @@ def capture_video_stream(
             continue
 
         handle_stream_cb(rec, cap, frame)
-        # time.sleep(.5)
+        time.sleep(.25)
 
 
 if __name__ == '__main__':
